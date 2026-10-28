@@ -15,7 +15,7 @@ env:
 jobs:
   build-and-push:
     name: Build & push application with Helm Chart
-    runs-on: linux
+    runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
@@ -26,7 +26,6 @@ jobs:
         with:
           fetch-depth: 0 # Whole history is needed for Sonar scan
 
-      # Login into CS Artifactory using technical user
       - name: Artifactory login
         uses: jfrog/setup-jfrog-cli@v2
 

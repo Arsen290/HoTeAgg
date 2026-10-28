@@ -1,0 +1,47 @@
+name: Check application and lint helm chart
+on:
+  # Trigger workflow when any pull request is updated
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  check-and-lint:
+    name: Build & push application with Helm Chart
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # Checkout repository into runner to access files
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # Whole history is needed for Sonar scan
+
+
+      - name: Artifactory login
+        uses: jfrog/setup-jfrog-cli@v2
+
+      # Setup Java on GitHub runner for correct build of application
+      - name: Setup JDK
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          overwrite-settings: false
+
+      # Package and test application
+      - name: Package and test app
+        run: ./mvnw package test
+
+      # Sonar analysis
+      - name: Check application
+        run: ./mvnw sonar:sonar
+        env:
+          SONAR_TOKEN : ${{ secrets.SONAR_TOKEN }}
+
+      # Helm chart lint check
+      - name: Helm lint check
+        run: helm lint chart
