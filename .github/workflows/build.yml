@@ -1,0 +1,68 @@
+name: Build and push application with helm chart
+
+on:
+  # Trigger workflow when pushed into 'main' branch or tag with 'v' prefix
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  # Manual workflow trigger
+  workflow_dispatch:
+
+env:
+  IMAGE_REPOSITORY: https://artifactory.csin.cz:443/artifactory/image-local
+  CHART_REPOSITORY: https://artifactory.csin.cz:443/artifactory/helm-local
+
+jobs:
+  build-and-push:
+    name: Build & push application with Helm Chart
+    runs-on: linux
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # Checkout repository into runner to access files
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # Whole history is needed for Sonar scan
+
+      # Login into CS Artifactory using technical user
+      - name: Artifactory login
+        uses: jfrog/setup-jfrog-cli@v2
+
+      # Setup Java on GitHub runner for correct build of application
+      - name: Setup JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          overwrite-settings: false
+
+      # Generates semantic version based on workflow trigger
+      - name: Build version
+        id: version
+        uses: actions/build-version@v1
+
+      # Package application
+      - name: Package app
+        run: ./mvnw verify
+
+      # Build image
+      - name: Build image
+        id: build
+        uses: actions/podman-build@v1
+
+      # Push image and chart
+      - name: Push image
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        run: podman push "$IMAGE"
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+
+      - name: Push chart
+        id: push-chart
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        uses: actions/helm-push@v1
+        with:
+            chart: ./helm/hoteagg
