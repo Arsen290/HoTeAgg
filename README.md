@@ -53,10 +53,11 @@ Flow: Simulator → WebSocket → `TelemetryWebSocketHandler` → `TelemetryInge
 ## Quick start (Docker: service + mock devices + dashboard)
 
 Three containers start together: `postgres` (database), `app` (HoTeAgg API + dashboard, port 8080) and `simulator` (mock devices sending telemetry to the app over WebSocket).
-Prerequisites: Docker with Compose (`docker compose` or standalone `docker-compose`); JDK 21+ only for the prebuilt variant below.
+Prerequisites: Docker with Compose (`docker compose` or standalone `docker-compose`) and JDK 21+ (to build the two jars with `./mvnw`).
 
 ```bash
-docker compose up -d --build      # builds the images inside Docker (needs access to Maven Central)
+./mvnw -DskipTests package && (cd simulator && ../mvnw -q package)   # build both jars on the host
+docker compose up -d              # postgres + app (jar mounted) + simulator (jar mounted)
 docker compose ps                 # postgres, app, simulator running
 docker compose logs -f simulator  # per-message "Ack: PERSISTED" lines (DEBUG level)
 
@@ -67,15 +68,10 @@ curl http://localhost:8080/actuator/health
 docker compose down               # add -v to delete the database volume
 ```
 
-If the in-Docker Maven download is blocked (e.g. TLS-intercepting proxy: `wget: Failed to fetch https://repo.maven.apache.org/...`, `PKIX path building failed`),
-build the jars on the host and run the same three services from them. **Verified:** all three containers ran, health `UP`, series API returned simulator data, `GET /` returned 200.
-```bash
-./mvnw -DskipTests package && (cd simulator && ../mvnw -q package)
-docker compose -f docker-compose.prebuilt.yml up -d
-docker compose -f docker-compose.prebuilt.yml down
-```
-`docker compose up -d --build` itself was **not** completed in the review environment because of that network blocker
-(a `.dockerignore` entry that hid `.mvn` from the build context was fixed). Please confirm it on an unrestricted network.
+**Verified:** with this single `docker-compose.yml`, all three containers ran, health `UP`, the series API returned simulator data, `GET /` returned 200.
+The compose file mounts the host-built jars into `eclipse-temurin:21-jre` containers instead of building images, because the Maven download inside the Docker build
+failed in the review environment (`wget: Failed to fetch https://repo.maven.apache.org/...`, typically a TLS-intercepting proxy). The `Dockerfile`s in the repo root and
+`simulator/` are not used by Compose; building them was not verified (a `.dockerignore` entry that hid `.mvn` from the build context was fixed).
 
 Configuration (env or `.env`, see `.env.example`): `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `SERVER_PORT`, `SIMULATOR_DEVICES` (3), `SIMULATOR_INTERVAL_SECONDS` (10).
 More devices, faster: `SIMULATOR_DEVICES=5 SIMULATOR_INTERVAL_SECONDS=2 docker compose up -d`.

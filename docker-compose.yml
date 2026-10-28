@@ -17,8 +17,14 @@ services:
       retries: 10
       start_period: 5s
     restart: unless-stopped
+  # Runs the jar built on the host (no Maven download inside Docker):
+  #   ./mvnw -DskipTests package && (cd simulator && ../mvnw -q package)
   app:
-    build: .
+    image: eclipse-temurin:21-jre
+    working_dir: /app
+    command: ["java", "-jar", "app.jar"]
+    volumes:
+      - ./target/HoTeAgg-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,7 +38,11 @@ services:
   # Separate "devices" process: only talks to the backend over WebSocket.
   # Started automatically; it retries with backoff until the backend is ready.
   simulator:
-    build: ./simulator
+    image: eclipse-temurin:21-jre
+    working_dir: /app
+    command: ["java", "-jar", "simulator.jar"]
+    volumes:
+      - ./simulator/target/hoteagg-simulator-0.0.1-SNAPSHOT.jar:/app/simulator.jar:ro
     depends_on:
       - app
     environment:
