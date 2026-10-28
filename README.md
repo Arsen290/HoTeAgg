@@ -4,8 +4,6 @@ Kotlin / Spring Boot backend that receives host telemetry over WebSocket, stores
 chart-ready time series over REST. A standalone simulator produces mock devices and a static HTML dashboard
 charts the data returned by the API.
 
-Detailed audit against the assignment: [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
-
 ## Overview
 
 ```mermaid
