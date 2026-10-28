@@ -53,19 +53,21 @@ Flow: Simulator → WebSocket → `TelemetryWebSocketHandler` → `TelemetryInge
 ## Quick start (Docker: service + mock devices + dashboard)
 
 Three containers start together: `postgres` (database), `app` (HoTeAgg API + dashboard, port 8080) and `simulator` (mock devices sending telemetry to the app over WebSocket).
-Prerequisites: Docker with Compose (`docker compose` or standalone `docker-compose`) and JDK 21+ (to build the two jars with `./mvnw`).
+Prerequisites: Docker, Docker Compose and JDK 21+ (to build the two jars with `./mvnw`).
+If `docker compose ...` fails with `unknown shorthand flag: 'd'`, the Compose plugin is missing: use the standalone binary `docker-compose` (with a hyphen) in every command below
+(`brew install docker-compose`), or enable the plugin: `mkdir -p ~/.docker/cli-plugins && ln -sf "$(which docker-compose)" ~/.docker/cli-plugins/docker-compose`.
 
 ```bash
 ./mvnw -DskipTests package && (cd simulator && ../mvnw -q package)   # build both jars on the host
-docker compose up -d              # postgres + app (jar mounted) + simulator (jar mounted)
-docker compose ps                 # postgres, app, simulator running
-docker compose logs -f simulator  # per-message "Ack: PERSISTED" lines (DEBUG level)
+docker-compose up -d              # postgres + app (jar mounted) + simulator (jar mounted); or: docker compose up -d
+docker-compose ps                 # postgres, app, simulator running
+docker-compose logs -f simulator  # per-message "Ack: PERSISTED" lines (DEBUG level)
 
 open http://localhost:8080        # dashboard: device host-0001, pick metric and range; data appears after ~10-20 s
 curl "http://localhost:8080/api/devices/host-0001/metrics/cpuUtilPct/series?range=1h"
 curl http://localhost:8080/actuator/health
 
-docker compose down               # add -v to delete the database volume
+docker-compose down               # add -v to delete the database volume
 ```
 
 **Verified:** with this single `docker-compose.yml`, all three containers ran, health `UP`, the series API returned simulator data, `GET /` returned 200.
@@ -74,7 +76,7 @@ failed in the review environment (`wget: Failed to fetch https://repo.maven.apac
 `simulator/` are not used by Compose; building them was not verified (a `.dockerignore` entry that hid `.mvn` from the build context was fixed).
 
 Configuration (env or `.env`, see `.env.example`): `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `SERVER_PORT`, `SIMULATOR_DEVICES` (3), `SIMULATOR_INTERVAL_SECONDS` (10).
-More devices, faster: `SIMULATOR_DEVICES=5 SIMULATOR_INTERVAL_SECONDS=2 docker compose up -d`.
+More devices, faster: `SIMULATOR_DEVICES=5 SIMULATOR_INTERVAL_SECONDS=2 docker-compose up -d`.
 Standalone simulator options: `--url`, `--devices`, `--interval-seconds`, `--duration-seconds`, `--seed`.
 
 Tests: `./mvnw verify` (integration tests need Docker; on Colima set `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock` and `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`), `(cd simulator && ../mvnw test)`, `node --test src/test/js/series-api.test.mjs`.
