@@ -42,11 +42,11 @@ class TelemetryIngestionIntegrationTest {
         val valid = """{"type":"stats","deviceId":"it-1","timestamp":"2026-10-26T14:03:20Z","stats":{"cpuUtilPct":37.5,"fanRpm":900}}"""
 
         session.sendMessage(TextMessage(valid))
-        assertTrue(assertNotNull(replies.poll(10, TimeUnit.SECONDS)).contains("ACCEPTED"))
+        assertTrue(assertNotNull(replies.poll(10, TimeUnit.SECONDS)).contains("PERSISTED"))
         session.sendMessage(TextMessage(valid))
         assertTrue(assertNotNull(replies.poll(10, TimeUnit.SECONDS)).contains("DUPLICATE"))
         session.sendMessage(TextMessage("{broken"))
-        assertTrue(assertNotNull(replies.poll(10, TimeUnit.SECONDS)).contains("REJECTED"))
+        assertTrue(assertNotNull(replies.poll(10, TimeUnit.SECONDS)).contains("INVALID"))
         session.close()
 
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM telemetry_metrics WHERE device_id = 'it-1'", Int::class.java))
@@ -58,7 +58,7 @@ class TelemetryIngestionIntegrationTest {
             "SELECT status FROM device_message_history WHERE device_id IN ('it-1','unknown') ORDER BY server_received_at",
             String::class.java,
         )
-        assertEquals(listOf("ACCEPTED", "DUPLICATE", "REJECTED"), statuses)
+        assertEquals(listOf("PERSISTED", "DUPLICATE", "INVALID"), statuses)
     }
 }
 

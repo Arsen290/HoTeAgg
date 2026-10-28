@@ -5,7 +5,6 @@ import com.ubiquiti.hoteagg.model.IngestionStatus
 import com.ubiquiti.hoteagg.model.TelemetryMessage
 import com.ubiquiti.hoteagg.repository.MessageHistoryRepository
 import com.ubiquiti.hoteagg.repository.TelemetryMetricsRepository
-import org.springframework.transaction.support.TransactionOperations
 import tools.jackson.databind.json.JsonMapper
 import java.time.Instant
 import kotlin.test.Test
@@ -43,7 +42,7 @@ class TelemetryIngestionServiceTest {
     private val metrics = FakeMetrics()
     private val history = FakeHistory()
     private val service = TelemetryIngestionService(
-        TelemetryMessageParser(mapper), metrics, history, TransactionOperations.withoutTransaction(), mapper,
+        TelemetryMessageParser(mapper), metrics, history, mapper,
     )
     private val receivedAt = Instant.parse("2026-10-26T14:03:21.500Z")
 
@@ -54,13 +53,13 @@ class TelemetryIngestionServiceTest {
     fun `valid message is stored and recorded as accepted with separate timestamps`() {
         val outcome = service.ingest(message(), receivedAt)
 
-        assertEquals(IngestionStatus.ACCEPTED, outcome.status)
+        assertEquals(IngestionStatus.PERSISTED, outcome.status)
         val (stored, serverTs) = metrics.rows.values.single()
         assertEquals(Instant.parse("2026-10-26T14:03:20Z"), stored.timestamp)
         assertEquals(receivedAt, serverTs)
         val h = history.entries.single()
         assertEquals(outcome.messageId, h.messageId)
-        assertEquals(IngestionStatus.ACCEPTED, h.status)
+        assertEquals(IngestionStatus.PERSISTED, h.status)
         assertEquals(Instant.parse("2026-10-26T14:03:20Z"), h.clientTimestamp)
         assertEquals(receivedAt, h.serverReceivedAt)
     }
@@ -80,7 +79,7 @@ class TelemetryIngestionServiceTest {
         assertEquals(IngestionStatus.DUPLICATE, outcome.status)
         assertEquals(1, metrics.rows.size)
         assertEquals(10.0, metrics.rows.values.single().first.stats["cpuUtilPct"])
-        assertEquals(listOf(IngestionStatus.ACCEPTED, IngestionStatus.DUPLICATE), history.entries.map { it.status })
+        assertEquals(listOf(IngestionStatus.PERSISTED, IngestionStatus.DUPLICATE), history.entries.map { it.status })
     }
 
     @Test
@@ -88,11 +87,11 @@ class TelemetryIngestionServiceTest {
         val raw = message(stats = """{"cpuUtilPct": 500}""")
         val outcome = service.ingest(raw, receivedAt)
 
-        assertEquals(IngestionStatus.REJECTED, outcome.status)
+        assertEquals(IngestionStatus.INVALID, outcome.status)
         assertTrue(outcome.errors.single().contains("cpuUtilPct"))
         assertTrue(metrics.rows.isEmpty())
         val h = history.entries.single()
-        assertEquals(IngestionStatus.REJECTED, h.status)
+        assertEquals(IngestionStatus.INVALID, h.status)
         assertEquals("host-1", h.deviceId)
         assertEquals(Instant.parse("2026-10-26T14:03:20Z"), h.clientTimestamp)
         assertEquals(raw, h.payload)
@@ -103,7 +102,7 @@ class TelemetryIngestionServiceTest {
     fun `malformed json is rejected with unknown device and no payload`() {
         val outcome = service.ingest("{not json", receivedAt)
 
-        assertEquals(IngestionStatus.REJECTED, outcome.status)
+        assertEquals(IngestionStatus.INVALID, outcome.status)
         val h = history.entries.single()
         assertEquals(TelemetryIngestionService.UNKNOWN_DEVICE, h.deviceId)
         assertNull(h.payload)
@@ -131,7 +130,7 @@ class TelemetryIngestionServiceTest {
             }
         }
         TelemetryIngestionService(
-            TelemetryMessageParser(mapper), counting, history, TransactionOperations.withoutTransaction(), mapper,
+            TelemetryMessageParser(mapper), counting, history, mapper,
         ).ingest(message(), receivedAt)
         assertEquals(1, calls)
     }
@@ -139,13 +138,48 @@ class TelemetryIngestionServiceTest {
     @Test
     fun `history write failure on rejected message does not throw`() {
         history.failWith = IllegalStateException("db down")
-        assertEquals(IngestionStatus.REJECTED, service.ingest("garbage", receivedAt).status)
+        assertEquals(IngestionStatus.INVALID, service.ingest("garbage", receivedAt).status)
     }
 
     @Test
-    fun `history write failure on valid message yields FAILED`() {
+    fun `history write failure does not change the outcome of a stored measurement`() {
         history.failWith = IllegalStateException("db down")
-        assertEquals(IngestionStatus.FAILED, service.ingest(message(), receivedAt).status)
+
+        val outcome = service.ingest(message(), receivedAt)
+
+        assertEquals(IngestionStatus.PERSISTED, outcome.status)
+        assertEquals(1, metrics.rows.size)
+    }
+
+    @Test
+    fun `every attempt gets its own server uuid, also for duplicates`() {
+        val first = service.ingest(message(), receivedAt)
+        val second = service.ingest(message(), receivedAt)
+
+        assertEquals(IngestionStatus.DUPLICATE, second.status)
+        assertNotEquals(first.messageId, second.messageId)
+        assertEquals(listOf(first.messageId, second.messageId), history.entries.map { it.messageId })
+        assertEquals(1, metrics.rows.size)
+    }
+
+    @Test
+    fun `unparseable client timestamp is recorded as null on an invalid message`() {
+        service.ingest(message(ts = "not-a-time"), receivedAt)
+
+        val h = history.entries.single()
+        assertEquals(IngestionStatus.INVALID, h.status)
+        assertNull(h.clientTimestamp)
+        assertEquals("host-1", h.deviceId)
+        assertEquals(receivedAt, h.serverReceivedAt)
+    }
+
+    @Test
+    fun `same timestamp from a different device is not a duplicate`() {
+        service.ingest(message(), receivedAt)
+        val other = message().replace("host-1", "host-2")
+
+        assertEquals(IngestionStatus.PERSISTED, service.ingest(other, receivedAt).status)
+        assertEquals(2, metrics.rows.size)
     }
 }
 

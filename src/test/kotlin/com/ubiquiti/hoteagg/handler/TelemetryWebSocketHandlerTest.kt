@@ -7,7 +7,6 @@ import com.ubiquiti.hoteagg.repository.TelemetryMetricsRepository
 import com.ubiquiti.hoteagg.service.TelemetryIngestionService
 import com.ubiquiti.hoteagg.service.TelemetryMessageParser
 import org.mockito.Mockito
-import org.springframework.transaction.support.TransactionOperations
 import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketMessage
@@ -40,7 +39,6 @@ class TelemetryWebSocketHandlerTest {
         object : MessageHistoryRepository {
             override fun record(entry: HistoryEntry) {}
         },
-        TransactionOperations.withoutTransaction(),
         mapper,
     )
     private val handler = TelemetryWebSocketHandler(service, mapper, Clock.fixed(receivedAt, ZoneOffset.UTC))
@@ -66,16 +64,16 @@ class TelemetryWebSocketHandlerTest {
         handler.handleMessage(session(), TextMessage(valid))
 
         assertEquals(receivedAt, stored.single().second)
-        assertTrue(sent.single().contains("\"status\":\"ACCEPTED\""))
+        assertTrue(sent.single().contains("\"status\":\"PERSISTED\""))
     }
 
     @Test
-    fun `invalid and malformed messages are answered with REJECTED`() {
+    fun `invalid and malformed messages are answered with INVALID`() {
         handler.handleMessage(session(), TextMessage("{oops"))
         handler.handleMessage(session(), TextMessage("""{"type":"x"}"""))
 
         assertEquals(2, sent.size)
-        assertTrue(sent.all { it.contains("\"status\":\"REJECTED\"") && it.contains("errors") })
+        assertTrue(sent.all { it.contains("\"status\":\"INVALID\"") && it.contains("errors") })
         assertTrue(stored.isEmpty())
     }
 

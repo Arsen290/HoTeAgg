@@ -9,7 +9,6 @@ import com.ubiquiti.hoteagg.repository.MessageHistoryRepository
 import com.ubiquiti.hoteagg.repository.TelemetryMetricsRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
-import org.springframework.transaction.support.TransactionOperations
 import tools.jackson.core.JacksonException
 import tools.jackson.databind.json.JsonMapper
 import java.time.Instant
@@ -20,13 +19,23 @@ import java.util.UUID
  * Validates one raw message, stores it and records the outcome. Never throws for bad input or
  * database errors; the result is always an [IngestionOutcome]. There are no retries: each
  * message is written at most once.
+ *
+ * Idempotency: a measurement is identified by (deviceId, client timestamp), enforced by the
+ * unique constraint on telemetry_metrics; a repeat is reported as DUPLICATE and writes no second
+ * row. The UUID generated here identifies one receive attempt (one history row) only. It is
+ * never a device-supplied id and is never used for de-duplication.
+ *
+ * Crash behaviour: the history row is written once, after the outcome is known. If the process
+ * dies in between, the measurement (if it was inserted) is durable but that attempt has no history
+ * row; a device resend is then answered DUPLICATE. If the database write fails, nothing is stored,
+ * FAILED is recorded when the database allows it, and the device may resend the same measurement
+ * safely because the write is idempotent.
  */
 @Service
 class TelemetryIngestionService(
     private val parser: TelemetryMessageParser,
     private val metrics: TelemetryMetricsRepository,
     private val history: MessageHistoryRepository,
-    private val tx: TransactionOperations,
     private val mapper: JsonMapper,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -41,38 +50,34 @@ class TelemetryIngestionService(
 
     private fun reject(messageId: UUID, raw: String, receivedAt: Instant, invalid: ParseResult.Invalid): IngestionOutcome {
         val envelope = inspect(raw)
-        log.warn("Rejected message {} from device {}: {}", messageId, envelope.deviceId, invalid)
-        val entry = HistoryEntry(
-            messageId, envelope.deviceId, envelope.clientTimestamp, receivedAt,
-            IngestionStatus.REJECTED, invalid.toString(), envelope.payload,
+        log.warn("Invalid message {} from device {}: {}", messageId, envelope.deviceId, invalid)
+        recordBestEffort(
+            HistoryEntry(
+                messageId, envelope.deviceId, envelope.clientTimestamp, receivedAt,
+                IngestionStatus.INVALID, invalid.toString(), envelope.payload,
+            )
         )
-        recordBestEffort(entry)
-        return IngestionOutcome(messageId, IngestionStatus.REJECTED, invalid.errors)
+        return IngestionOutcome(messageId, IngestionStatus.INVALID, invalid.errors)
     }
 
     private fun store(messageId: UUID, raw: String, receivedAt: Instant, message: TelemetryMessage): IngestionOutcome {
-        try {
-            val inserted = tx.execute {
-                val inserted = metrics.insertIfAbsent(message, receivedAt)
-                val status = if (inserted) IngestionStatus.ACCEPTED else IngestionStatus.DUPLICATE
-                history.record(
-                    HistoryEntry(messageId, message.deviceId, message.timestamp, receivedAt, status, null, raw)
-                )
-                inserted
-            } == true
-            val status = if (inserted) IngestionStatus.ACCEPTED else IngestionStatus.DUPLICATE
-            if (!inserted) log.debug("Duplicate measurement for {} at {}", message.deviceId, message.timestamp)
-            return IngestionOutcome(messageId, status)
+        fun entry(status: IngestionStatus, error: String? = null) =
+            HistoryEntry(messageId, message.deviceId, message.timestamp, receivedAt, status, error, raw)
+
+        val status = try {
+            // One atomic, idempotent statement (INSERT ... ON CONFLICT DO NOTHING); no transaction needed.
+            if (metrics.insertIfAbsent(message, receivedAt)) IngestionStatus.PERSISTED else IngestionStatus.DUPLICATE
         } catch (e: Exception) {
             log.error("Failed to persist message {} from device {}", messageId, message.deviceId, e)
-            recordBestEffort(
-                HistoryEntry(
-                    messageId, message.deviceId, message.timestamp, receivedAt,
-                    IngestionStatus.FAILED, "persistence error: ${e.javaClass.simpleName}", raw,
-                )
-            )
+            recordBestEffort(entry(IngestionStatus.FAILED, "persistence error: ${e.javaClass.simpleName}"))
             return IngestionOutcome(messageId, IngestionStatus.FAILED, listOf("internal error, message not stored"))
         }
+        if (status == IngestionStatus.DUPLICATE) {
+            log.debug("Duplicate measurement for {} at {}", message.deviceId, message.timestamp)
+        }
+        // The measurement is already durable; a history failure is logged but does not change the outcome.
+        recordBestEffort(entry(status))
+        return IngestionOutcome(messageId, status)
     }
 
     /** History is an audit trail; a failure to write it must not break message handling. */
