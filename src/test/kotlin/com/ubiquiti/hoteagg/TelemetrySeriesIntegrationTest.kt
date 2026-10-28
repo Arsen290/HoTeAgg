@@ -20,7 +20,7 @@ import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** Real HTTP + real TimescaleDB (Testcontainers; requires Docker): SQL, time_bucket and JSONB handling. */
+/** Real HTTP + real PostgreSQL (Testcontainers; requires Docker): SQL, epoch bucketing and JSONB handling. */
 @Import(TestcontainersConfiguration::class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class TelemetrySeriesIntegrationTest {

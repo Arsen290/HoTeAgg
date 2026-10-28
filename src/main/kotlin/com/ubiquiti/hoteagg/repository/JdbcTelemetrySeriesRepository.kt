@@ -23,7 +23,7 @@ class JdbcTelemetrySeriesRepository(private val jdbc: JdbcClient) : TelemetrySer
             .param("key", statsKey)
             .param("from", OffsetDateTime.ofInstant(from, ZoneOffset.UTC))
             .param("to", OffsetDateTime.ofInstant(to, ZoneOffset.UTC))
-        if (bucket != null) statement.param("bucket", "${bucket.seconds} seconds")
+        if (bucket != null) statement.param("bucketSeconds", bucket.seconds.toDouble())
         return statement
             .query { rs, _ ->
                 SeriesPoint(rs.getObject("ts", OffsetDateTime::class.java).toInstant(), rs.getDouble("value"))
@@ -44,7 +44,9 @@ class JdbcTelemetrySeriesRepository(private val jdbc: JdbcClient) : TelemetrySer
             """
 
         const val BUCKETED_SQL = """
-            SELECT time_bucket(CAST(:bucket AS interval), client_timestamp) AS ts,
+            -- Plain PostgreSQL bucketing (replaces TimescaleDB time_bucket): floor the epoch to the bucket start.
+            -- SELECT time_bucket(CAST(:bucket AS interval), client_timestamp) AS ts,
+            SELECT to_timestamp(floor(extract(epoch FROM client_timestamp) / :bucketSeconds) * :bucketSeconds) AS ts,
                    avg((stats ->> CAST(:key AS text))::double precision) AS value
             FROM telemetry_metrics
             WHERE device_id = :deviceId
