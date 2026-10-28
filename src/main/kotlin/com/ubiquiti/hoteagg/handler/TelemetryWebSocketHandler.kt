@@ -28,8 +28,12 @@ class TelemetryWebSocketHandler(
     }
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
-        val receivedAt = clock.instant() // first thing, before validation and persistence
+        val receivedAt = clock.instant()
+        try {
             reply(session, ingestion.ingest(message.payload, receivedAt))
+        } catch (e: Exception) {
+            log.error("Unexpected error handling message on session {}", session.id, e)
+        }
     }
 
     override fun handleTransportError(session: WebSocketSession, exception: Throwable) {
@@ -41,12 +45,17 @@ class TelemetryWebSocketHandler(
     }
 
     private fun reply(session: WebSocketSession, outcome: IngestionOutcome) {
-        val body = buildMap {
-            put("status", outcome.status.name)
-            put("messageId", outcome.messageId.toString())
-            if (outcome.errors.isNotEmpty()) put("errors", outcome.errors)
+        try {
+            val body = buildMap {
+                put("status", outcome.status.name)
+                put("messageId", outcome.messageId.toString())
+                if (outcome.errors.isNotEmpty()) put("errors", outcome.errors)
+            }
+            if (session.isOpen) session.sendMessage(TextMessage(mapper.writeValueAsString(body)))
+        } catch (e: Exception) {
+            // The device may have disconnected; the message itself is already processed.
+            log.debug("Could not send acknowledgement on session {}: {}", session.id, e.toString())
         }
-        if (session.isOpen) session.sendMessage(TextMessage(mapper.writeValueAsString(body)))
     }
 }
 
