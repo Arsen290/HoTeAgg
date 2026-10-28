@@ -13,7 +13,6 @@ import java.time.Clock
 class WebSocketConfig(private val handler: TelemetryWebSocketHandler) : WebSocketConfigurer {
 
     override fun registerWebSocketHandlers(registry: WebSocketHandlerRegistry) {
-        // Devices are not browsers, so origin checks do not apply.
         registry.addHandler(handler, "/ws/telemetry").setAllowedOrigins("*")
     }
 
