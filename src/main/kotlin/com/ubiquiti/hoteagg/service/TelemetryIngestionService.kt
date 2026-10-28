@@ -42,37 +42,36 @@ class TelemetryIngestionService(
     private fun reject(messageId: UUID, raw: String, receivedAt: Instant, invalid: ParseResult.Invalid): IngestionOutcome {
         val envelope = inspect(raw)
         log.warn("Rejected message {} from device {}: {}", messageId, envelope.deviceId, invalid)
-        recordBestEffort(
-            HistoryEntry(
-                messageId, envelope.deviceId, envelope.clientTimestamp, receivedAt,
-                IngestionStatus.REJECTED, invalid.toString(), envelope.payload,
-            )
+        val entry = HistoryEntry(
+            messageId, envelope.deviceId, envelope.clientTimestamp, receivedAt,
+            IngestionStatus.REJECTED, invalid.toString(), envelope.payload,
         )
+        recordBestEffort(entry)
         return IngestionOutcome(messageId, IngestionStatus.REJECTED, invalid.errors)
     }
 
     private fun store(messageId: UUID, raw: String, receivedAt: Instant, message: TelemetryMessage): IngestionOutcome {
-        fun entry(status: IngestionStatus, error: String? = null) =
-            HistoryEntry(messageId, message.deviceId, message.timestamp, receivedAt, status, error, raw)
-
-        return try {
-            val status = checkNotNull(
-                tx.execute {
-                    val status =
-                        if (metrics.insertIfAbsent(message, receivedAt)) IngestionStatus.ACCEPTED
-                        else IngestionStatus.DUPLICATE
-                    history.record(entry(status))
-                    status
-                }
-            )
-            if (status == IngestionStatus.DUPLICATE) {
-                log.debug("Duplicate measurement for {} at {}", message.deviceId, message.timestamp)
-            }
-            IngestionOutcome(messageId, status)
+        try {
+            val inserted = tx.execute {
+                val inserted = metrics.insertIfAbsent(message, receivedAt)
+                val status = if (inserted) IngestionStatus.ACCEPTED else IngestionStatus.DUPLICATE
+                history.record(
+                    HistoryEntry(messageId, message.deviceId, message.timestamp, receivedAt, status, null, raw)
+                )
+                inserted
+            } == true
+            val status = if (inserted) IngestionStatus.ACCEPTED else IngestionStatus.DUPLICATE
+            if (!inserted) log.debug("Duplicate measurement for {} at {}", message.deviceId, message.timestamp)
+            return IngestionOutcome(messageId, status)
         } catch (e: Exception) {
             log.error("Failed to persist message {} from device {}", messageId, message.deviceId, e)
-            recordBestEffort(entry(IngestionStatus.FAILED, "persistence error: ${e.javaClass.simpleName}"))
-            IngestionOutcome(messageId, IngestionStatus.FAILED, listOf("internal error, message not stored"))
+            recordBestEffort(
+                HistoryEntry(
+                    messageId, message.deviceId, message.timestamp, receivedAt,
+                    IngestionStatus.FAILED, "persistence error: ${e.javaClass.simpleName}", raw,
+                )
+            )
+            return IngestionOutcome(messageId, IngestionStatus.FAILED, listOf("internal error, message not stored"))
         }
     }
 
