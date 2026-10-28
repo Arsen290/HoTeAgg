@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HoTeAgg — Host Telemetry Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>HoTeAgg — Host Telemetry Dashboard</h1>
+    <div id="status" class="status status-idle" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="status-text">Not loaded yet</span>
+    </div>
+  </header>
+
+  <main>
+    <form id="controls" class="controls" autocomplete="off">
+      <div class="field">
+        <label for="device">Device ID</label>
+        <input id="device" name="device" type="text" value="host-0001" maxlength="128" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="metric">Metric</label>
+        <select id="metric" name="metric"></select>
+      </div>
+      <div class="field">
+        <label for="range">Time range</label>
+        <select id="range" name="range">
+          <option value="1h">Last 1 hour</option>
+          <option value="24h">Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="auto">Auto-refresh</label>
+        <select id="auto" name="auto">
+          <option value="0">Off</option>
+          <option value="10">Every 10 s</option>
+          <option value="30" selected>Every 30 s</option>
+          <option value="60">Every 60 s</option>
+        </select>
+      </div>
+      <button id="refresh" type="submit">Refresh</button>
+    </form>
+
+    <section class="card" aria-labelledby="selection">
+      <div class="card-head">
+        <h2 id="selection">Selection</h2>
+        <p class="selection-line">
+          Device <strong id="sel-device">–</strong> ·
+          Metric <strong id="sel-metric">–</strong> ·
+          Range <strong id="sel-range">–</strong>
+        </p>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart" role="img" aria-label="Telemetry time series chart"></canvas>
+        <div id="overlay" class="overlay" hidden></div>
+      </div>
+      <p id="summary" class="summary"></p>
+    </section>
+  </main>
+
+  <script src="vendor/chart.umd.min.js"></script>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>
+
