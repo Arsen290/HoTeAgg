@@ -138,6 +138,23 @@ class SeriesApiTest {
     }
 
     @Test
+    fun `aggregated windows start on a bucket boundary so the first bucket is complete`() {
+        val unaligned = Instant.parse("2026-10-28T12:03:27Z")
+        val unalignedMvc = MockMvcBuilders.standaloneSetup(
+            SeriesController(TelemetrySeriesService(repository, Clock.fixed(unaligned, ZoneOffset.UTC)))
+        ).build()
+
+        unalignedMvc.perform(get(url(range = "24h"))).andExpect(status().isOk)
+        unalignedMvc.perform(get(url(range = "7d"))).andExpect(status().isOk)
+        unalignedMvc.perform(get(url(range = "1h"))).andExpect(status().isOk)
+
+        assertEquals(Instant.parse("2026-10-27T12:00:00Z"), calls[0].from)   // 24h -> 5 min boundary
+        assertEquals(Instant.parse("2026-10-21T12:00:00Z"), calls[1].from)   // 7d -> 30 min boundary
+        assertEquals(Instant.parse("2026-10-28T11:03:27Z"), calls[2].from)   // 1h raw: exact window
+        assertEquals(unaligned, calls[0].to)
+    }
+
+    @Test
     fun `no data returns 200 with an empty points array`() {
         result = emptyList()
 

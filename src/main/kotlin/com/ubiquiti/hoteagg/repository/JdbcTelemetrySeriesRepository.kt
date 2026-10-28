@@ -5,8 +5,6 @@ import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 import java.time.Duration
 import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.ZoneOffset
 
 @Repository
 class JdbcTelemetrySeriesRepository(private val jdbc: JdbcClient) : TelemetrySeriesRepository {
@@ -18,16 +16,14 @@ class JdbcTelemetrySeriesRepository(private val jdbc: JdbcClient) : TelemetrySer
         to: Instant,
         bucket: Duration?,
     ): List<SeriesPoint> {
-        val statement = jdbc.sql(if (bucket == null) RAW_SQL else BUCKETED_SQL)
+        var statement = jdbc.sql(if (bucket == null) RAW_SQL else BUCKETED_SQL)
             .param("deviceId", deviceId)
             .param("key", statsKey)
-            .param("from", OffsetDateTime.ofInstant(from, ZoneOffset.UTC))
-            .param("to", OffsetDateTime.ofInstant(to, ZoneOffset.UTC))
-        if (bucket != null) statement.param("bucketSeconds", bucket.seconds.toDouble())
+            .param("from", from.toUtc())
+            .param("to", to.toUtc())
+        if (bucket != null) statement = statement.param("bucketSeconds", bucket.seconds.toDouble())
         return statement
-            .query { rs, _ ->
-                SeriesPoint(rs.getObject("ts", OffsetDateTime::class.java).toInstant(), rs.getDouble("value"))
-            }
+            .query { rs, _ -> SeriesPoint(rs.getInstant("ts"), rs.getDouble("value")) }
             .list()
     }
 
@@ -43,9 +39,8 @@ class JdbcTelemetrySeriesRepository(private val jdbc: JdbcClient) : TelemetrySer
             ORDER BY client_timestamp
             """
 
+        // Buckets are aligned to the Unix epoch (UTC): floor(epoch / size) * size is the bucket start.
         const val BUCKETED_SQL = """
-            -- Plain PostgreSQL bucketing (replaces TimescaleDB time_bucket): floor the epoch to the bucket start.
-            -- SELECT time_bucket(CAST(:bucket AS interval), client_timestamp) AS ts,
             SELECT to_timestamp(floor(extract(epoch FROM client_timestamp) / :bucketSeconds) * :bucketSeconds) AS ts,
                    avg((stats ->> CAST(:key AS text))::double precision) AS value
             FROM telemetry_metrics

@@ -12,8 +12,6 @@ class TestcontainersConfiguration {
     @Bean
     @ServiceConnection
     fun postgresContainer(): PostgreSQLContainer {
-        // TimescaleDB disabled, plain PostgreSQL is used:
-        // DockerImageName.parse("timescale/timescaledb:latest-pg16").asCompatibleSubstituteFor("postgres")
         return PostgreSQLContainer(DockerImageName.parse("postgres:16"))
     }
 

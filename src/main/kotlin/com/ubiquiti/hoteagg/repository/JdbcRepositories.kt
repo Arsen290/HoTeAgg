@@ -7,10 +7,6 @@ import org.springframework.stereotype.Repository
 import tools.jackson.databind.json.JsonMapper
 import java.sql.Types
 import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.ZoneOffset
-
-private fun Instant.toUtc(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)
 
 @Repository
 class JdbcTelemetryMetricsRepository(
