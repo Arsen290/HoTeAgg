@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0 # Whole history is needed for Sonar scan
 
       - name: Artifactory login
-        uses: jfrog/setup-jfrog-cli@v2
+        uses: jfrog/setup-jfrog-cli@v5
 
       # Setup Java on GitHub runner for correct build of application
       - name: Setup JDK
